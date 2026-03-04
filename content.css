@@ -1,0 +1,17 @@
+/**
+ * Content Script CSS - 划词翻译样式
+ * 此文件通过 manifest.json 注入，但主要样式在 Shadow DOM 中定义
+ * 这里只保留必要的全局样式覆盖
+ */
+
+/* 确保插件容器始终在最上层 */
+#minimal-translator-host {
+  all: initial !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+}

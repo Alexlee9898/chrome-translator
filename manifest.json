@@ -1,0 +1,107 @@
+/**
+ * manifest.json
+ * Chrome Extension Manifest V3 配置文件
+ * 翻译插件 - Apple Design Style
+ */
+
+{
+  // 清单版本，MV3 是 Chrome 扩展的最新版本
+  "manifest_version": 3,
+  
+  // 扩展名称
+  "name": "极简翻译 - Apple Style",
+  
+  // 版本号，遵循语义化版本规范
+  "version": "1.0.0",
+  
+  // 扩展描述
+  "description": "极简风格的划词翻译和输入翻译工具，采用 Apple Design 设计语言",
+  
+  // 作者信息
+  "author": "Chrome Translator Team",
+  
+  // 默认语言设置
+  "default_locale": "zh_CN",
+  
+  // 权限声明
+  "permissions": [
+    // activeTab: 访问当前活动标签页的内容
+    "activeTab",
+    // storage: 本地存储，用于保存设置和历史记录
+    "storage",
+    // scripting: 在页面中注入和执行脚本
+    "scripting"
+  ],
+  
+  // 主机权限 - 预留 API 调用权限
+  "host_permissions": [
+    // 预留 Google Translate API 或其他翻译服务
+    "https://translate.googleapis.com/*",
+    "https://api.translation-service.com/*"
+  ],
+  
+  // 后台服务 Worker 配置
+  "background": {
+    "service_worker": "background.js",
+    // 支持 ES6 模块
+    "type": "module"
+  },
+  
+  // 内容脚本配置
+  "content_scripts": [
+    {
+      // 匹配的页面 URL 模式
+      "matches": ["<all_urls>"],
+      // 排除的页面（扩展商店页面无法注入）
+      "exclude_matches": [
+        "https://chrome.google.com/webstore/*",
+        "https://chromewebstore.google.com/*"
+      ],
+      // 注入的 JS 文件
+      "js": ["content.js"],
+      // 注入的 CSS 文件
+      "css": ["content.css"],
+      // 注入时机：文档开始加载时
+      "run_at": "document_start",
+      // 是否在所有 frame 中注入
+      "all_frames": false
+    }
+  ],
+  
+  // 浏览器操作按钮配置（右上角图标）
+  "action": {
+    // 默认图标，按尺寸指定
+    "default_icon": {
+      "16": "icons/icon16.svg",
+      "48": "icons/icon48.svg",
+      "128": "icons/icon128.svg"
+    },
+    // 默认标题（鼠标悬停时显示）
+    "default_title": "极简翻译",
+    // 点击图标时打开的弹窗页面
+    "default_popup": "popup.html"
+  },
+  
+  // 扩展图标配置
+  "icons": {
+    "16": "icons/icon16.svg",
+    "48": "icons/icon48.svg",
+    "128": "icons/icon128.svg"
+  },
+  
+  // Web 可访问资源配置
+  "web_accessible_resources": [
+    {
+      // 允许网页访问的资源
+      "resources": ["icons/*.svg"],
+      // 允许的页面来源
+      "matches": ["<all_urls>"]
+    }
+  ],
+  
+  // 内容安全策略配置
+  "content_security_policy": {
+    // 扩展页面的 CSP 策略
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
