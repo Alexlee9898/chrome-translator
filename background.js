@@ -1,48 +1,19 @@
 /**
- * background.js
- * Service Worker - 后台服务工作线程
- * 
- * 功能：
- * 1. 处理跨域 API 调用（内容脚本无法直接请求外部 API）
- * 2. 管理扩展状态和缓存
- * 3. 处理消息中转
- * 4. 预留 Google Translate API 和其他翻译服务接口
+ * background.js - Service Worker
+ * 跨域翻译 API、存储与消息中转
  */
 
-// ==========================================
-// 配置常量
-// ==========================================
-
-// API 配置 - 预留接口位置
 const API_CONFIG = {
-  // Google Translate API (需要 API Key)
-  // 使用说明：
-  // 1. 访问 https://cloud.google.com/translate 获取 API Key
-  // 2. 在 chrome.storage 中设置 apiKey
-  // 3. 取消下方代码注释并填入 Key
-  
-  // google: {
-  //   endpoint: 'https://translation.googleapis.com/language/translate/v2',
-  //   key: '' // 通过 chrome.storage.local.get('apiKey') 获取
-  // },
-  
-  // 备用翻译服务配置示例
-  // deepl: {
-  //   endpoint: 'https://api-free.deepl.com/v2/translate',
-  //   key: ''
-  // },
-  
-  // 请求超时时间（毫秒）
-  timeout: 10000
+  timeout: 12000,
+  openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-3.5-turbo' },
+  claude: { endpoint: 'https://api.anthropic.com/v1/messages', model: 'claude-3-haiku-20240307' },
+  google: { endpoint: 'https://translation.googleapis.com/language/translate/v2' },
+  kimi: { endpoint: 'https://api.moonshot.cn/v1/chat/completions', model: 'kimi-k2.5' },
+  qwen: { endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', model: 'qwen-turbo' },
+  glm: { endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-4-flash' }
 };
 
-// 存储键名常量
-const STORAGE_KEYS = {
-  SETTINGS: 'settings',      // 用户设置
-  HISTORY: 'history',        // 翻译历史
-  API_KEY: 'apiKey',         // API 密钥
-  CACHE: 'translationCache'  // 翻译缓存
-};
+const STORAGE_KEYS = { SETTINGS: 'settings', HISTORY: 'history', CACHE: 'translationCache' };
 
 // ==========================================
 // 初始化
@@ -51,53 +22,25 @@ const STORAGE_KEYS = {
 /**
  * 扩展安装/更新时初始化
  */
-chrome.runtime.onInstalled.addListener((details) => {
-  console.log('[Background] 扩展状态变化:', details.reason);
-  
-  // 初始化默认设置
+chrome.runtime.onInstalled.addListener(() => {
   initializeSettings();
-  
-  // 清理过期缓存
   cleanExpiredCache();
 });
 
-/**
- * 初始化默认设置
- */
 async function initializeSettings() {
   try {
-    // 获取当前设置
     const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
-    
-    // 如果没有设置，创建默认配置
     if (!result[STORAGE_KEYS.SETTINGS]) {
-      const defaultSettings = {
-        // 翻译服务选择
-        service: 'builtin',  // 'builtin', 'google', 'deepl'
-        // 默认目标语言
-        targetLang: 'zh-CN',
-        // 自动检测语言
-        autoDetect: true,
-        // 划词翻译开关
-        selectionEnabled: true,
-        // 悬浮按钮延迟（毫秒）
-        buttonDelay: 300,
-        // 自动翻译延迟（毫秒）
-        translateDelay: 500,
-        // 历史记录保存数量
-        historyLimit: 10,
-        // 缓存过期时间（小时）
-        cacheExpiry: 24
-      };
-      
-      await chrome.storage.local.set({ 
-        [STORAGE_KEYS.SETTINGS]: defaultSettings 
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.SETTINGS]: {
+          service: 'kimi',
+          historyLimit: 10,
+          apiKeys: { openai: '', claude: '', google: '', kimi: '', qwen: '', glm: '' }
+        }
       });
-      
-      console.log('[Background] 已初始化默认设置');
     }
-  } catch (error) {
-    console.error('[Background] 初始化设置失败:', error);
+  } catch (e) {
+    console.error('[Background] 初始化设置失败:', e);
   }
 }
 
@@ -109,512 +52,258 @@ async function initializeSettings() {
  * 监听来自内容脚本和弹出窗口的消息
  * 实现安全的消息中转机制
  */
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('[Background] 收到消息:', request.action, '来自:', sender.tab?.id || 'popup');
-  
-  // 使用异步处理模式，保持消息通道开放
-  handleMessage(request, sender).then(sendResponse).catch(error => {
-    console.error('[Background] 消息处理错误:', error);
-    sendResponse({ success: false, error: error.message });
+const MESSAGE_HANDLERS = {
+  translate: (data) => handleTranslate(data),
+  detectLanguage: (data) => handleDetectLanguage(data),
+  getSettings: () => handleGetSettings(),
+  saveSettings: (data) => handleSaveSettings(data),
+  getHistory: () => handleGetHistory(),
+  saveHistory: (data) => handleSaveHistory(data),
+  clearHistory: () => handleClearHistory(),
+  clearCache: () => handleClearCache()
+};
+
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  const handler = MESSAGE_HANDLERS[request.action];
+  const promise = handler ? handler(request.data) : Promise.resolve({ success: false, error: `未知操作: ${request.action}` });
+  promise.then(sendResponse).catch((e) => {
+    console.error('[Background]', e);
+    sendResponse({ success: false, error: e.message });
   });
-  
-  // 返回 true 表示将异步发送响应
   return true;
 });
 
-/**
- * 消息分发处理器
- */
-async function handleMessage(request, sender) {
-  const { action, data } = request;
-  
-  switch (action) {
-    // 翻译请求
-    case 'translate':
-      return await handleTranslate(data);
-    
-    // 检测语言
-    case 'detectLanguage':
-      return await handleDetectLanguage(data);
-    
-    // 获取设置
-    case 'getSettings':
-      return await handleGetSettings();
-    
-    // 保存设置
-    case 'saveSettings':
-      return await handleSaveSettings(data);
-    
-    // 获取翻译历史
-    case 'getHistory':
-      return await handleGetHistory();
-    
-    // 保存翻译历史
-    case 'saveHistory':
-      return await handleSaveHistory(data);
-    
-    // 清理缓存
-    case 'clearCache':
-      return await handleClearCache();
-    
-    // 预留：调用 Google Translate API
-    case 'googleTranslate':
-      // 需要配置 API Key 后启用
-      // return await callGoogleTranslate(data);
-      return { success: false, error: 'Google Translate API 未配置' };
-    
-    default:
-      return { success: false, error: `未知操作: ${action}` };
-  }
-}
-
-// ==========================================
-// 翻译处理
-// ==========================================
-
-/**
- * 处理翻译请求
- * 优先使用缓存，其次根据配置选择翻译服务
- */
 async function handleTranslate({ text, sourceLang, targetLang }) {
   try {
-    // 参数校验
-    if (!text || text.trim().length === 0) {
-      return { success: false, error: '文本不能为空' };
-    }
-    
-    // 去除首尾空白
-    const cleanText = text.trim();
-    
-    // 1. 检查缓存
+    const cleanText = (text || '').trim();
+    if (!cleanText) return { success: false, error: '文本不能为空' };
+
     const cached = await getCachedTranslation(cleanText, sourceLang, targetLang);
-    if (cached) {
-      console.log('[Background] 命中缓存');
-      return { success: true, data: cached, fromCache: true };
-    }
-    
-    // 2. 获取用户设置
-    const settings = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
-    const service = settings[STORAGE_KEYS.SETTINGS]?.service || 'builtin';
-    
-    // 3. 根据服务选择翻译方式
-    let result;
-    switch (service) {
-      case 'google':
-        result = await translateWithGoogle(cleanText, sourceLang, targetLang);
-        break;
-      case 'builtin':
-      default:
-        result = await translateWithBuiltin(cleanText, sourceLang, targetLang);
-        break;
-    }
-    
-    // 4. 缓存结果
-    if (result.success) {
-      await cacheTranslation(cleanText, sourceLang, targetLang, result.data);
-    }
-    
+    if (cached) return { success: true, data: cached, fromCache: true };
+
+    const { [STORAGE_KEYS.SETTINGS]: st = {} } = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+    const service = st.service || 'kimi';
+    const translators = { openai: translateWithOpenAI, claude: translateWithClaude, google: translateWithGoogle, kimi: translateWithKimi, qwen: translateWithQwen, glm: translateWithGLM };
+    const fn = translators[service];
+    const result = fn ? await fn(cleanText, sourceLang, targetLang, st) : { success: false, error: '请先在设置中选择翻译服务并填写 API Key' };
+
+    if (result.success) await cacheTranslation(cleanText, sourceLang, targetLang, result.data);
     return result;
-    
-  } catch (error) {
-    console.error('[Background] 翻译失败:', error);
-    return { success: false, error: error.message };
+  } catch (e) {
+    console.error('[Background] 翻译失败:', e);
+    return { success: false, error: e.message };
   }
 }
 
-/**
- * 使用内置词典翻译
- * 这是一个简化的实现，实际使用时可以扩展为完整的词典
- */
-async function translateWithBuiltin(text, sourceLang, targetLang) {
-  // 模拟翻译延迟
-  await new Promise(resolve => setTimeout(resolve, 100));
-  
-  // 简单的中英互译词典（常见 2000 词中的部分示例）
-  const dictionary = {
-    // 英文 -> 中文
-    en_to_zh: {
-      'hello': '你好',
-      'world': '世界',
-      'thank': '谢谢',
-      'you': '你',
-      'please': '请',
-      'sorry': '对不起',
-      'good': '好的',
-      'morning': '早上好',
-      'night': '晚安',
-      'love': '爱',
-      'friend': '朋友',
-      'family': '家人',
-      'happy': '快乐',
-      'beautiful': '美丽',
-      'computer': '电脑',
-      'phone': '手机',
-      'water': '水',
-      'food': '食物',
-      'book': '书',
-      'time': '时间'
-    },
-    // 中文 -> 英文
-    zh_to_en: {
-      '你好': 'hello',
-      '世界': 'world',
-      '谢谢': 'thank you',
-      '请': 'please',
-      '对不起': 'sorry',
-      '好的': 'good',
-      '早上好': 'good morning',
-      '晚安': 'good night',
-      '爱': 'love',
-      '朋友': 'friend',
-      '家人': 'family',
-      '快乐': 'happy',
-      '美丽': 'beautiful',
-      '电脑': 'computer',
-      '手机': 'phone',
-      '水': 'water',
-      '食物': 'food',
-      '书': 'book',
-      '时间': 'time'
-    }
-  };
-  
-  // 检测源语言（简化逻辑）
-  const isChinese = /[\u4e00-\u9fa5]/.test(text);
-  
-  // 选择合适的词典方向
-  let dict;
-  if (isChinese) {
-    dict = dictionary.zh_to_en;
-  } else {
-    dict = dictionary.en_to_zh;
-    // 转换为小写进行匹配
-    text = text.toLowerCase();
-  }
-  
-  // 查找翻译
-  let translation = dict[text];
-  
-  // 如果没有精确匹配，尝试模糊匹配（这里简化处理）
-  if (!translation) {
-    // 检查是否是短语或句子
-    if (text.includes(' ')) {
-      translation = '[短语翻译] ' + text;
-    } else if (/[\u4e00-\u9fa5]/.test(text) && text.length > 1) {
-      translation = '[中文词汇] ' + text;
-    } else {
-      translation = `[未收录] ${text}`;
-    }
-  }
-  
-  return {
-    success: true,
-    data: {
-      originalText: text,
-      translatedText: translation,
-      sourceLang: isChinese ? 'zh-CN' : 'en',
-      targetLang: isChinese ? 'en' : 'zh-CN',
-      service: 'builtin'
-    }
-  };
+function getApiKey(settings, service) {
+  return ((settings?.apiKeys || {})[service] || '').trim();
 }
 
-/**
- * Google Translate API 调用（预留接口）
- * 使用说明：
- * 1. 获取 Google Cloud API Key
- * 2. 在设置中配置 apiKey
- * 3. 启用此函数
- */
-async function translateWithGoogle(text, sourceLang, targetLang) {
-  // 获取 API Key
-  const { apiKey } = await chrome.storage.local.get(STORAGE_KEYS.API_KEY);
-  
-  if (!apiKey) {
-    return {
-      success: false,
-      error: '未配置 Google Translate API Key，请先在设置中配置'
-    };
+function buildTranslatePrompt(text, targetLang) {
+  if (targetLang === 'auto') return `若以下内容为中文则翻译成英文，若为英文则翻译成中文。只输出翻译结果，不要解释。\n\n${text}`;
+  const toLang = targetLang?.startsWith('zh') ? '简体中文' : '英文';
+  return `请将以下内容翻译成${toLang}，只输出翻译结果，不要解释。\n\n${text}`;
+}
+
+function detectSourceLang(text) { return /\p{Script=Han}/u.test(text) ? 'zh-CN' : 'en'; }
+function getTargetLangForAuto(sourceLang) { return sourceLang?.startsWith('zh') ? 'en' : 'zh-CN'; }
+
+function makeLLMResult(text, translated, sourceLang, targetLang, service) {
+  const detected = sourceLang || detectSourceLang(text);
+  const resolvedTarget = targetLang === 'auto' ? getTargetLangForAuto(detected) : (targetLang || 'zh-CN');
+  return { success: true, data: { originalText: text, translatedText: translated, sourceLang: detected, targetLang: resolvedTarget, service } };
+}
+
+/** OpenAI 兼容接口：POST JSON，响应为 choices[0].message.content */
+async function callOpenAIStyleAPI(endpoint, model, apiKey, prompt) {
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 1000 })
+  });
+  if (!res.ok) throw new Error((await res.text()) || `API ${res.status}`);
+  const data = await res.json();
+  const translated = data.choices?.[0]?.message?.content?.trim();
+  if (!translated) throw new Error('无效响应');
+  return translated;
+}
+
+async function translateWithOpenAI(text, sourceLang, targetLang, settings) {
+  const apiKey = getApiKey(settings, 'openai');
+  if (!apiKey) return { success: false, error: '请在设置中填写 OpenAI API Key' };
+  try {
+    const translated = await callOpenAIStyleAPI(API_CONFIG.openai.endpoint, API_CONFIG.openai.model, apiKey, buildTranslatePrompt(text, targetLang));
+    return makeLLMResult(text, translated, sourceLang, targetLang, 'openai');
+  } catch (e) {
+    return { success: false, error: e.message || 'OpenAI 翻译失败' };
   }
-  
+}
+
+async function translateWithClaude(text, sourceLang, targetLang, settings) {
+  const apiKey = getApiKey(settings, 'claude');
+  if (!apiKey) return { success: false, error: '请在设置中填写 Claude API Key' };
+  try {
+    const res = await fetch(API_CONFIG.claude.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: API_CONFIG.claude.model, max_tokens: 1000, messages: [{ role: 'user', content: buildTranslatePrompt(text, targetLang) }] })
+    });
+    if (!res.ok) throw new Error((await res.text()) || `API ${res.status}`);
+    const block = (await res.json()).content?.find(b => b.type === 'text');
+    const translated = block?.text?.trim();
+    if (!translated) throw new Error('无效响应');
+    return makeLLMResult(text, translated, sourceLang, targetLang, 'claude');
+  } catch (e) {
+    return { success: false, error: e.message || 'Claude 翻译失败' };
+  }
+}
+
+async function translateWithGoogle(text, sourceLang, targetLang, settings) {
+  const apiKey = getApiKey(settings, 'google');
+  if (!apiKey) return { success: false, error: '请在设置中填写 Google 翻译 API Key' };
+  const detected = sourceLang || detectSourceLang(text);
+  const resolvedTarget = targetLang === 'auto' ? getTargetLangForAuto(detected) : (targetLang || 'zh-CN');
   try {
     const url = new URL(API_CONFIG.google.endpoint);
-    url.searchParams.append('key', apiKey);
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        q: text,
-        source: sourceLang || 'auto',
-        target: targetLang || 'zh-CN',
-        format: 'text'
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error(`API 错误: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    return {
-      success: true,
-      data: {
-        originalText: text,
-        translatedText: data.data.translations[0].translatedText,
-        sourceLang: data.data.translations[0].detectedSourceLanguage || sourceLang,
-        targetLang: targetLang,
-        service: 'google'
-      }
-    };
-    
-  } catch (error) {
-    console.error('[Background] Google Translate API 错误:', error);
-    // 降级到内置翻译
-    return await translateWithBuiltin(text, sourceLang, targetLang);
+    url.searchParams.set('key', apiKey); url.searchParams.set('q', text); url.searchParams.set('target', resolvedTarget); url.searchParams.set('format', 'text');
+    if (detected) url.searchParams.set('source', detected);
+    const res = await fetch(url, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.text()) || `API ${res.status}`);
+    const t = (await res.json()).data?.translations?.[0];
+    if (!t) throw new Error('无效响应');
+    const finalSource = t.detectedSourceLanguage || detected || 'en';
+    return { success: true, data: { originalText: text, translatedText: t.translatedText, sourceLang: finalSource, targetLang: resolvedTarget, service: 'google' } };
+  } catch (e) {
+    return { success: false, error: e.message || 'Google 翻译失败' };
   }
 }
 
-// ==========================================
-// 语言检测
-// ==========================================
+async function translateWithKimi(text, sourceLang, targetLang, settings) {
+  const cleanedKey = (getApiKey(settings, 'kimi') || '').replace(/\s/g, '');
+  if (!cleanedKey) return { success: false, error: '请在设置中填写 Kimi API Key' };
+  if (!cleanedKey.startsWith('sk-')) return { success: false, error: 'Kimi API Key 格式错误，应以 sk- 开头' };
+  try {
+    const translated = await callOpenAIStyleAPI(API_CONFIG.kimi.endpoint, API_CONFIG.kimi.model, cleanedKey, buildTranslatePrompt(text, targetLang));
+    return makeLLMResult(text, translated, sourceLang, targetLang, 'kimi');
+  } catch (e) {
+    const msg = e.message || '';
+    if (e.message && (msg.includes('401') || msg.includes('Authentication'))) return { success: false, error: 'Kimi API Key 无效，请检查 Key 是否正确或已过期' };
+    if (msg.includes('429')) return { success: false, error: '请求过于频繁，请稍后再试' };
+    if (msg.includes('402') || msg.includes('balance') || msg.includes('credit')) return { success: false, error: 'Kimi 账户余额不足，请前往官网充值' };
+    return { success: false, error: e.message || 'Kimi 翻译失败' };
+  }
+}
 
-/**
- * 检测文本语言
- * 优先使用 chrome.i18n.detectLanguage
- */
+async function translateWithQwen(text, sourceLang, targetLang, settings) {
+  const apiKey = getApiKey(settings, 'qwen');
+  if (!apiKey) return { success: false, error: '请在设置中填写 Qwen API Key' };
+  try {
+    const translated = await callOpenAIStyleAPI(API_CONFIG.qwen.endpoint, API_CONFIG.qwen.model, apiKey, buildTranslatePrompt(text, targetLang));
+    return makeLLMResult(text, translated, sourceLang, targetLang, 'qwen');
+  } catch (e) {
+    return { success: false, error: e.message || 'Qwen 翻译失败' };
+  }
+}
+
+async function translateWithGLM(text, sourceLang, targetLang, settings) {
+  const apiKey = getApiKey(settings, 'glm');
+  if (!apiKey) return { success: false, error: '请在设置中填写 GLM 智谱 API Key' };
+  try {
+    const translated = await callOpenAIStyleAPI(API_CONFIG.glm.endpoint, API_CONFIG.glm.model, apiKey, buildTranslatePrompt(text, targetLang));
+    return makeLLMResult(text, translated, sourceLang, targetLang, 'glm');
+  } catch (e) {
+    return { success: false, error: e.message || 'GLM 翻译失败' };
+  }
+}
+
 async function handleDetectLanguage({ text }) {
   try {
-    if (!text || text.trim().length === 0) {
-      return { success: false, error: '文本不能为空' };
-    }
-    
-    // 使用 Chrome i18n API 检测语言
-    // 注意：此 API 仅在特定上下文中可用
+    if (!(text || '').trim()) return { success: false, error: '文本不能为空' };
     if (chrome.i18n?.detectLanguage) {
       const result = await chrome.i18n.detectLanguage(text);
-      
-      // 选择置信度最高的语言
-      const languages = result.languages.sort((a, b) => b.percentage - a.percentage);
-      
-      if (languages.length > 0) {
-        return {
-          success: true,
-          data: {
-            language: languages[0].language,
-            confidence: languages[0].percentage,
-            isReliable: result.isReliable
-          }
-        };
-      }
+      const top = result.languages?.sort((a, b) => b.percentage - a.percentage)[0];
+      if (top) return { success: true, data: { language: top.language, confidence: top.percentage, isReliable: result.isReliable } };
     }
-    
-    // 备用：简单规则检测
     const isChinese = /[\u4e00-\u9fa5]/.test(text);
-    const isEnglish = /^[a-zA-Z\s]+$/.test(text);
-    
-    return {
-      success: true,
-      data: {
-        language: isChinese ? 'zh-CN' : (isEnglish ? 'en' : 'unknown'),
-        confidence: 80,
-        isReliable: false,
-        method: 'fallback'
-      }
-    };
-    
-  } catch (error) {
-    console.error('[Background] 语言检测失败:', error);
-    return { success: false, error: error.message };
+    return { success: true, data: { language: isChinese ? 'zh-CN' : (/^[a-zA-Z\s]+$/.test(text) ? 'en' : 'unknown'), confidence: 80, isReliable: false } };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 }
 
-// ==========================================
-// 缓存管理
-// ==========================================
+const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000;
+function generateCacheKey(text, sourceLang, targetLang) {
+  let h = 0;
+  const s = `${text}:${sourceLang}:${targetLang}`;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return `cache_${h}`;
+}
 
-/**
- * 获取缓存的翻译
- */
 async function getCachedTranslation(text, sourceLang, targetLang) {
   try {
-    const cacheKey = generateCacheKey(text, sourceLang, targetLang);
-    const result = await chrome.storage.local.get(STORAGE_KEYS.CACHE);
-    const cache = result[STORAGE_KEYS.CACHE] || {};
-    
-    const cached = cache[cacheKey];
-    if (cached && Date.now() - cached.timestamp < 24 * 60 * 60 * 1000) {
-      return cached.data;
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('[Background] 读取缓存失败:', error);
-    return null;
-  }
+    const { [STORAGE_KEYS.CACHE]: cache = {} } = await chrome.storage.local.get(STORAGE_KEYS.CACHE);
+    const entry = cache[generateCacheKey(text, sourceLang, targetLang)];
+    return entry && (Date.now() - entry.timestamp < CACHE_EXPIRY_MS) ? entry.data : null;
+  } catch (_) { return null; }
 }
 
-/**
- * 保存翻译到缓存
- */
 async function cacheTranslation(text, sourceLang, targetLang, data) {
   try {
-    const cacheKey = generateCacheKey(text, sourceLang, targetLang);
-    const result = await chrome.storage.local.get(STORAGE_KEYS.CACHE);
-    const cache = result[STORAGE_KEYS.CACHE] || {};
-    
-    // 限制缓存大小（最多 100 条）
+    const { [STORAGE_KEYS.CACHE]: cache = {} } = await chrome.storage.local.get(STORAGE_KEYS.CACHE);
     const keys = Object.keys(cache);
-    if (keys.length >= 100) {
-      // 删除最旧的条目
-      const oldest = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp)[0];
-      delete cache[oldest];
-    }
-    
-    cache[cacheKey] = {
-      data,
-      timestamp: Date.now()
-    };
-    
+    if (keys.length >= 100) delete cache[keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp)[0]];
+    cache[generateCacheKey(text, sourceLang, targetLang)] = { data, timestamp: Date.now() };
     await chrome.storage.local.set({ [STORAGE_KEYS.CACHE]: cache });
-    
-  } catch (error) {
-    console.error('[Background] 保存缓存失败:', error);
-  }
+  } catch (_) {}
 }
 
-/**
- * 生成缓存键
- */
-function generateCacheKey(text, sourceLang, targetLang) {
-  // 简单的哈希函数
-  let hash = 0;
-  const str = `${text}:${sourceLang}:${targetLang}`;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return `cache_${hash}`;
-}
-
-/**
- * 清理过期缓存
- */
 async function cleanExpiredCache() {
   try {
-    const result = await chrome.storage.local.get(STORAGE_KEYS.CACHE);
-    const cache = result[STORAGE_KEYS.CACHE] || {};
+    const { [STORAGE_KEYS.CACHE]: cache = {} } = await chrome.storage.local.get(STORAGE_KEYS.CACHE);
     const now = Date.now();
-    const expiry = 24 * 60 * 60 * 1000; // 24 小时
-    
-    let cleaned = 0;
-    for (const key in cache) {
-      if (now - cache[key].timestamp > expiry) {
-        delete cache[key];
-        cleaned++;
-      }
-    }
-    
+    for (const k of Object.keys(cache)) if (now - cache[k].timestamp > CACHE_EXPIRY_MS) delete cache[k];
     await chrome.storage.local.set({ [STORAGE_KEYS.CACHE]: cache });
-    console.log(`[Background] 清理了 ${cleaned} 条过期缓存`);
-    
-  } catch (error) {
-    console.error('[Background] 清理缓存失败:', error);
-  }
+  } catch (_) {}
 }
-
-// ==========================================
-// 设置管理
-// ==========================================
 
 async function handleGetSettings() {
   try {
-    const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
-    return { 
-      success: true, 
-      data: result[STORAGE_KEYS.SETTINGS] 
-    };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+    const { [STORAGE_KEYS.SETTINGS]: data } = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+    return { success: true, data };
+  } catch (e) { return { success: false, error: e.message }; }
 }
 
 async function handleSaveSettings(data) {
   try {
     await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: data });
     return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+  } catch (e) { return { success: false, error: e.message }; }
 }
-
-// ==========================================
-// 历史记录管理
-// ==========================================
 
 async function handleGetHistory() {
   try {
-    const result = await chrome.storage.local.get(STORAGE_KEYS.HISTORY);
-    return { 
-      success: true, 
-      data: result[STORAGE_KEYS.HISTORY] || [] 
-    };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+    const { [STORAGE_KEYS.HISTORY]: list = [] } = await chrome.storage.local.get(STORAGE_KEYS.HISTORY);
+    return { success: true, data: list };
+  } catch (e) { return { success: false, error: e.message }; }
 }
 
-async function handleSaveHistory({ originalText, translatedText, sourceLang, targetLang }) {
+async function handleSaveHistory(data) {
   try {
-    const result = await chrome.storage.local.get(STORAGE_KEYS.HISTORY);
-    let history = result[STORAGE_KEYS.HISTORY] || [];
-    
-    // 添加新记录到开头
-    history.unshift({
-      originalText,
-      translatedText,
-      sourceLang,
-      targetLang,
-      timestamp: Date.now()
-    });
-    
-    // 限制数量（最多 10 条）
-    const limit = 10;
-    if (history.length > limit) {
-      history = history.slice(0, limit);
-    }
-    
-    await chrome.storage.local.set({ [STORAGE_KEYS.HISTORY]: history });
+    if (data?.clear) { await chrome.storage.local.set({ [STORAGE_KEYS.HISTORY]: [] }); return { success: true }; }
+    const { [STORAGE_KEYS.HISTORY]: history = [] } = await chrome.storage.local.get(STORAGE_KEYS.HISTORY);
+    history.unshift({ ...data, timestamp: Date.now() });
+    await chrome.storage.local.set({ [STORAGE_KEYS.HISTORY]: history.slice(0, 10) });
     return { success: true };
-    
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+  } catch (e) { return { success: false, error: e.message }; }
 }
 
-// ==========================================
-// 其他功能
-// ==========================================
+async function handleClearHistory() {
+  try { await chrome.storage.local.set({ [STORAGE_KEYS.HISTORY]: [] }); return { success: true }; } catch (e) { return { success: false, error: e.message }; }
+}
 
 async function handleClearCache() {
-  try {
-    await chrome.storage.local.set({ [STORAGE_KEYS.CACHE]: {} });
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+  try { await chrome.storage.local.set({ [STORAGE_KEYS.CACHE]: {} }); return { success: true }; } catch (e) { return { success: false, error: e.message }; }
 }
 
-// 定期清理缓存（每小时）
 chrome.alarms?.create?.('cleanCache', { periodInMinutes: 60 });
-chrome.alarms?.onAlarm?.addListener((alarm) => {
-  if (alarm.name === 'cleanCache') {
-    cleanExpiredCache();
-  }
-});
-
-console.log('[Background] Service Worker 已启动');
+chrome.alarms?.onAlarm?.addListener((a) => { if (a.name === 'cleanCache') cleanExpiredCache(); });

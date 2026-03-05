@@ -1,19 +1,12 @@
 /**
- * Content Script - 划词翻译模块
- * 注入到每个网页，负责文本选择检测和悬浮卡片显示
- * 使用 Shadow DOM 实现完全的样式隔离
+ * Content Script - 划词翻译，Shadow DOM 隔离
  */
-
 (function() {
   'use strict';
 
-  // ============================================
-  // 配置常量
-  // ============================================
-  
   const CONFIG = {
     // 延迟显示时间（毫秒）- 避免干扰正常选择
-    SHOW_DELAY: 300,
+    SHOW_DELAY: 100,
     
     // 最小选择文本长度
     MIN_TEXT_LENGTH: 1,
@@ -31,18 +24,8 @@
     CARD_MARGIN: 16
   };
 
-  // ============================================
-  // Shadow DOM 容器
-  // ============================================
-  
-  let shadowHost = null;
-  let shadowRoot = null;
-  let isInitialized = false;
+  let shadowHost = null, shadowRoot = null, isInitialized = false;
 
-  /**
-   * 初始化 Shadow DOM
-   * 创建一个完全隔离的 DOM 环境，避免与宿主网页样式冲突
-   */
   function initShadowDOM() {
     if (isInitialized) return;
     
@@ -53,8 +36,8 @@
       position: fixed !important;
       top: 0 !important;
       left: 0 !important;
-      width: 0 !important;
-      height: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
       z-index: 2147483647 !important;
       pointer-events: none !important;
     `;
@@ -69,17 +52,13 @@
     injectStyles();
     
     isInitialized = true;
-    console.log('[Translator Content] Shadow DOM initialized');
   }
 
-  /**
-   * 注入 CSS 样式到 Shadow DOM
-   */
   function injectStyles() {
     const styleSheet = document.createElement('style');
     styleSheet.textContent = `
       /* ============================================
-         Apple Design System Variables
+         Design System Variables
          ============================================ */
       :host {
         --bg-primary: #FFFFFF;
@@ -95,7 +74,7 @@
         --radius-sm: 8px;
         --radius-md: 12px;
         --radius-lg: 16px;
-        --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --font-family: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
         --transition-fast: 150ms ease-out;
         --transition-normal: 200ms ease-out;
         --transition-slow: 300ms ease-out;
@@ -113,20 +92,20 @@
          Floating Button (划词后显示的翻译按钮)
          ============================================ */
       .floating-button {
-        position: absolute;
-        width: 32px;
-        height: 32px;
-        background: var(--bg-primary);
-        border: none;
-        border-radius: 50%;
-        box-shadow: var(--shadow-md);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-        z-index: 1000;
-        animation: buttonAppear var(--transition-normal);
+        position: absolute !important;
+        width: 32px !important;
+        height: 32px !important;
+        background: #FFFFFF !important;
+        border: none !important;
+        border-radius: 50% !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1) !important;
+        cursor: pointer !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: transform 150ms ease-out, box-shadow 150ms ease-out !important;
+        z-index: 10000 !important;
+        animation: buttonAppear 200ms ease-out !important;
       }
 
       .floating-button:hover {
@@ -139,9 +118,9 @@
       }
 
       .floating-button svg {
-        width: 16px;
-        height: 16px;
-        fill: var(--accent-blue);
+        width: 16px !important;
+        height: 16px !important;
+        fill: #007AFF !important;
       }
 
       @keyframes buttonAppear {
@@ -359,43 +338,24 @@
     shadowRoot.appendChild(styleSheet);
   }
 
-  // ============================================
-  // 状态管理
-  // ============================================
-  
-  let currentSelection = null;      // 当前选中的文本
-  let floatingButton = null;        // 悬浮按钮元素
-  let translationCard = null;       // 翻译卡片元素
-  let showButtonTimer = null;       // 显示按钮的定时器
-  let lastMousePosition = { x: 0, y: 0 };  // 最后鼠标位置
+  let currentSelection = null, floatingButton = null, translationCard = null, showButtonTimer = null;
+  let lastMousePosition = { x: 0, y: 0 };
 
-  // ============================================
-  // 事件监听
-  // ============================================
-
-  /**
-   * 初始化内容脚本
-   */
   function init() {
     // 等待页面加载完成
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initContentScript);
-    } else {
-      initContentScript();
-    }
+    } else initContentScript();
   }
 
-  /**
-   * 初始化内容脚本核心功能
-   */
   function initContentScript() {
     initShadowDOM();
     
     // 监听鼠标释放事件（文本选择结束）
     document.addEventListener('mouseup', handleMouseUp, { passive: true });
     
-    // 监听鼠标按下事件（开始新选择时隐藏旧元素）
-    document.addEventListener('mousedown', handleMouseDown, { passive: true });
+    // 监听鼠标按下事件（使用捕获阶段，确保先处理）
+    document.addEventListener('mousedown', handleMouseDown, { capture: true });
     
     // 监听键盘事件（ESC 关闭）
     document.addEventListener('keydown', handleKeyDown, { passive: true });
@@ -405,55 +365,53 @@
     
     // 监听窗口大小改变
     window.addEventListener('resize', hideAllElements, { passive: true });
-    
-    console.log('[Translator Content] Initialized');
   }
 
-  /**
-   * 处理鼠标释放事件
-   * @param {MouseEvent} e - 鼠标事件
-   */
   function handleMouseUp(e) {
     // 如果点击在翻译元素内部，不处理
     if (isClickInsideTranslator(e.target)) {
       return;
     }
     
-    // 保存鼠标位置
     lastMousePosition = { x: e.clientX, y: e.clientY };
     
-    // 获取选中的文本
     const selection = window.getSelection();
     const selectedText = selection.toString().trim();
     
-    // 检查文本是否有效
     if (!isValidText(selectedText)) {
       hideAllElements();
       return;
     }
     
-    // 保存当前选择
+    let range = null;
+    try {
+      if (selection.rangeCount >= 1) {
+        range = selection.getRangeAt(0);
+      }
+    } catch (err) {
+      // getRangeAt 错误，忽略
+    }
+    
     currentSelection = {
       text: selectedText,
-      range: selection.getRangeAt(0)
+      range: range
     };
     
-    // 延迟显示悬浮按钮（避免干扰正常选择操作）
+    // 在定时器外捕获选中文本，避免用户在此前点击别处导致 currentSelection 被清空
+    const capturedText = selectedText;
     clearTimeout(showButtonTimer);
     showButtonTimer = setTimeout(() => {
-      showFloatingButton(e.clientX, e.clientY);
+      showFloatingButton(lastMousePosition.x, lastMousePosition.y, capturedText);
     }, CONFIG.SHOW_DELAY);
   }
 
-  /**
-   * 处理鼠标按下事件
-   * @param {MouseEvent} e - 鼠标事件
-   */
   function handleMouseDown(e) {
-    // 如果点击在翻译元素外部，隐藏所有元素
-    if (!isClickInsideTranslator(e.target)) {
-      hideAllElements();
+    // 如果点击在翻译元素内部，不处理
+    if (isClickInsideTranslator(e.target)) {
+      return;
     }
+    // 点击页面其他区域时，隐藏所有元素并清空选择
+    hideAllElements();
   }
 
   /**
@@ -471,23 +429,33 @@
   // UI 元素创建与管理
   // ============================================
 
-  /**
-   * 显示悬浮翻译按钮
-   * @param {number} x - X 坐标
-   * @param {number} y - Y 坐标
-   */
-  function showFloatingButton(x, y) {
-    // 先隐藏现有元素
+  function showFloatingButton(x, y, preservedText) {
+    const selectedText = preservedText ?? currentSelection?.text ?? '';
+    if (!isValidText(selectedText)) {
+      hideAllElements();
+      return;
+    }
+    
     hideAllElements();
+    
+    // 确保 Shadow DOM 已初始化
+    if (!shadowRoot) {
+      initShadowDOM();
+    }
+    
+    // 恢复 currentSelection 供后续卡片显示源文使用
+    currentSelection = { text: selectedText, range: null };
     
     // 创建按钮
     floatingButton = document.createElement('div');
     floatingButton.className = 'translator-container floating-button';
     floatingButton.innerHTML = `
-      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
         <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
       </svg>
     `;
+    
+    floatingButton.dataset.selectedText = selectedText;
     
     // 计算位置（防止超出视窗）
     const position = calculateButtonPosition(x, y);
@@ -497,34 +465,21 @@
     // 点击事件
     floatingButton.addEventListener('click', (e) => {
       e.stopPropagation();
-      showTranslationCard(position.x, position.y);
+      // 使用按钮上保存的文本
+      const text = floatingButton.dataset.selectedText;
+      showTranslationCard(position.x, position.y, text);
     });
     
     shadowRoot.appendChild(floatingButton);
   }
 
-  /**
-   * 显示翻译结果卡片
-   * @param {number} x - X 坐标
-   * @param {number} y - Y 坐标
-   */
-  async function showTranslationCard(x, y) {
-    // 隐藏按钮
-    if (floatingButton) {
-      floatingButton.remove();
-      floatingButton = null;
-    }
-    
-    // 创建卡片
+  async function showTranslationCard(x, y, text) {
+    if (floatingButton) { floatingButton.remove(); floatingButton = null; }
     translationCard = document.createElement('div');
     translationCard.className = 'translator-container translation-card';
-    
-    // 计算位置
     const position = calculateCardPosition(x, y);
     translationCard.style.left = `${position.x}px`;
     translationCard.style.top = `${position.y}px`;
-    
-    // 初始显示加载状态
     translationCard.innerHTML = `
       <div class="loading">翻译中</div>
     `;
@@ -533,30 +488,22 @@
     
     // 执行翻译
     try {
-      const result = await translateText(currentSelection.text);
+      // 优先使用传入的文本，否则使用 currentSelection
+      const textToTranslate = text || (currentSelection?.text);
+      if (!textToTranslate) {
+        throw new Error('未选择文本');
+      }
+      const result = await translateText(textToTranslate);
       renderTranslationCard(result);
     } catch (error) {
       renderError(error.message);
     }
   }
 
-  /**
-   * 渲染翻译结果卡片
-   * @param {Object} result - 翻译结果
-   */
   function renderTranslationCard(result) {
-    const fromLang = result.source === 'zh' ? '中文' : 'English';
-    const toLang = result.target === 'zh' ? '中文' : 'English';
-    const fromCode = result.source === 'zh' ? 'ZH' : 'EN';
-    const toCode = result.target === 'zh' ? 'ZH' : 'EN';
-    
     translationCard.innerHTML = `
       <div class="card-header">
-        <div class="language-indicator">
-          <span class="lang-code">${fromCode}</span>
-          <span class="arrow">→</span>
-          <span class="lang-code">${toCode}</span>
-        </div>
+        <span></span>
         <button class="close-button" title="关闭 (ESC)">
           <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
@@ -579,23 +526,22 @@
     `;
     
     // 绑定关闭按钮事件
-    translationCard.querySelector('.close-button').addEventListener('click', (e) => {
+    const closeBtn = translationCard.querySelector('.close-button');
+    closeBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       hideTranslationCard();
     });
     
     // 绑定复制按钮事件
     const copyButton = translationCard.querySelector('.copy-button');
+    copyButton.addEventListener('mousedown', (e) => e.stopPropagation());
     copyButton.addEventListener('click', async (e) => {
       e.stopPropagation();
       await copyToClipboard(result.text, copyButton);
     });
   }
 
-  /**
-   * 渲染错误信息
-   * @param {string} message - 错误消息
-   */
   function renderError(message) {
     translationCard.innerHTML = `
       <div class="card-header">
@@ -617,16 +563,6 @@
     });
   }
 
-  // ============================================
-  // 位置计算
-  // ============================================
-
-  /**
-   * 计算悬浮按钮位置（防止超出视窗）
-   * @param {number} x - 鼠标 X 坐标
-   * @param {number} y - 鼠标 Y 坐标
-   * @returns {Object} - { x, y }
-   */
   function calculateButtonPosition(x, y) {
     const buttonSize = CONFIG.BUTTON_SIZE;
     const margin = 8;
@@ -648,12 +584,6 @@
     return { x: posX, y: posY };
   }
 
-  /**
-   * 计算卡片位置（智能避让）
-   * @param {number} x - 参考 X 坐标
-   * @param {number} y - 参考 Y 坐标
-   * @returns {Object} - { x, y }
-   */
   function calculateCardPosition(x, y) {
     const cardWidth = CONFIG.CARD_MAX_WIDTH;
     const cardHeight = 200; // 预估高度
@@ -679,97 +609,46 @@
     return { x: posX, y: posY };
   }
 
-  // ============================================
-  // 工具函数
-  // ============================================
-
-  /**
-   * 翻译文本
-   * @param {string} text - 待翻译文本
-   * @returns {Promise} - 翻译结果
-   */
   async function translateText(text) {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        {
-          type: 'TRANSLATE',
-          data: { text, from: 'auto', to: 'auto' }
-        },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (response.error) {
-            reject(new Error(response.error));
-          } else {
-            resolve(response);
-          }
+      chrome.runtime.sendMessage({ action: 'translate', data: { text, sourceLang: 'auto', targetLang: 'auto' } }, (r) => {
+        if (chrome.runtime.lastError) {
+          const msg = chrome.runtime.lastError.message || '';
+          reject(new Error(msg.includes('Extension context invalidated') ? '扩展已更新或已重载，请刷新当前页面后重试' : msg));
+          return;
         }
-      );
+        if (r?.error) { reject(new Error(r.error)); return; }
+        if (r?.success && r.data) {
+          const d = r.data;
+          resolve({ text: d.translatedText || '', source: d.sourceLang?.startsWith('zh') ? 'zh' : 'en', target: d.targetLang?.startsWith('zh') ? 'zh' : 'en' });
+          return;
+        }
+        reject(new Error('翻译无响应'));
+      });
     });
   }
 
-  /**
-   * 复制文本到剪贴板
-   * @param {string} text - 要复制的文本
-   * @param {HTMLElement} button - 按钮元素（用于显示成功状态）
-   */
+  const COPY_BTN_DEFAULT = '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg><span>复制</span>';
+  const COPY_BTN_DONE = '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg><span>已复制</span>';
   async function copyToClipboard(text, button) {
     try {
       await navigator.clipboard.writeText(text);
-      
-      // 显示成功状态
       button.classList.add('success');
-      button.innerHTML = `
-        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-          <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-        </svg>
-        <span>已复制</span>
-      `;
-      
-      // 1.5 秒后恢复
-      setTimeout(() => {
-        button.classList.remove('success');
-        button.innerHTML = `
-          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
-          </svg>
-          <span>复制</span>
-        `;
-      }, 1500);
-    } catch (e) {
-      console.error('[Translator] Copy failed:', e);
-    }
+      button.innerHTML = COPY_BTN_DONE;
+      setTimeout(() => { button.classList.remove('success'); button.innerHTML = COPY_BTN_DEFAULT; }, 1500);
+    } catch (_) {}
   }
 
-  /**
-   * 检查文本是否有效
-   * @param {string} text - 待检查文本
-   * @returns {boolean} - 是否有效
-   */
   function isValidText(text) {
-    if (!text) return false;
-    if (text.length < CONFIG.MIN_TEXT_LENGTH) return false;
-    if (text.length > CONFIG.MAX_TEXT_LENGTH) return false;
-    return true;
+    return text && text.length >= CONFIG.MIN_TEXT_LENGTH && text.length <= CONFIG.MAX_TEXT_LENGTH;
   }
 
-  /**
-   * 检查点击是否在翻译元素内部
-   * @param {HTMLElement} target - 点击目标
-   * @returns {boolean} - 是否在内部
-   */
   function isClickInsideTranslator(target) {
-    // 检查是否在 Shadow DOM 内
+    if (!target) return false;
     const host = document.getElementById('minimal-translator-host');
-    if (!host) return false;
-    
-    // 检查点击目标是否是 host 本身或是 host 内的元素
-    return target === host || host.contains(target);
+    return host && (host === target || host.contains(target) || target.getRootNode() === shadowRoot);
   }
 
-  /**
-   * 隐藏所有翻译元素
-   */
   function hideAllElements() {
     clearTimeout(showButtonTimer);
     
@@ -783,9 +662,6 @@
     currentSelection = null;
   }
 
-  /**
-   * 隐藏翻译卡片（带动画）
-   */
   function hideTranslationCard() {
     if (translationCard) {
       translationCard.classList.add('closing');
@@ -798,11 +674,6 @@
     }
   }
 
-  /**
-   * HTML 转义，防止 XSS
-   * @param {string} text - 原始文本
-   * @returns {string} - 转义后的文本
-   */
   function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -810,9 +681,359 @@
   }
 
   // ============================================
-  // 启动
+  // 悬浮助手按钮（右下角小圆圈）
   // ============================================
   
-  init();
+  let assistantButton = null;
+  let assistantPanel = null;
   
+  /**
+   * 创建悬浮助手按钮
+   */
+  function createAssistantButton() {
+    if (assistantButton) return;
+    
+    assistantButton = document.createElement('div');
+    assistantButton.className = 'translator-container assistant-button';
+    assistantButton.innerHTML = `
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+        <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+      </svg>
+    `;
+    
+    // 固定位置：右下角
+    assistantButton.style.cssText = `
+      position: fixed !important;
+      right: 20px !important;
+      bottom: 20px !important;
+      width: 48px !important;
+      height: 48px !important;
+      background: #007AFF !important;
+      border-radius: 50% !important;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+      cursor: pointer !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      z-index: 10001 !important;
+      transition: transform 150ms ease-out, box-shadow 150ms ease-out !important;
+    `;
+    
+    assistantButton.addEventListener('mouseenter', () => {
+      assistantButton.style.transform = 'scale(1.1)';
+      assistantButton.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)';
+    });
+    
+    assistantButton.addEventListener('mouseleave', () => {
+      assistantButton.style.transform = 'scale(1)';
+      assistantButton.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+    });
+    
+    assistantButton.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleAssistantPanel();
+    });
+    
+    shadowRoot.appendChild(assistantButton);
+
+  }
+  
+  /**
+   * 切换助手面板显示/隐藏
+   */
+  function toggleAssistantPanel() {
+    if (assistantPanel) {
+      hideAssistantPanel();
+    } else {
+      showAssistantPanel();
+    }
+  }
+  
+  /**
+   * 显示助手面板
+   */
+  function showAssistantPanel() {
+    // 隐藏其他元素
+    hideAllElements();
+    
+    assistantPanel = document.createElement('div');
+    assistantPanel.className = 'translator-container assistant-panel';
+    
+    // 面板位置：按钮左上方
+    assistantPanel.style.cssText = `
+      position: fixed !important;
+      right: 20px !important;
+      bottom: 80px !important;
+      width: 320px !important;
+      background: #FFFFFF !important;
+      border-radius: 16px !important;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2) !important;
+      z-index: 10002 !important;
+      overflow: hidden !important;
+      animation: panelAppear 200ms ease-out !important;
+    `;
+    
+    assistantPanel.innerHTML = `
+      <div class="panel-header">
+        <span class="panel-title">极简翻译</span>
+        <button class="panel-close">&times;</button>
+      </div>
+      <div class="panel-body">
+        <textarea class="panel-input" placeholder="输入要翻译的文本..." rows="3"></textarea>
+        <div class="panel-result">
+          <p class="result-placeholder">翻译结果将显示在这里</p>
+        </div>
+      </div>
+      <div class="panel-footer">
+        <button class="panel-translate-btn">翻译</button>
+      </div>
+    `;
+    
+    // 添加样式
+    const panelStyle = document.createElement('style');
+    panelStyle.textContent = `
+      .assistant-panel .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-bottom: 1px solid rgba(0,0,0,0.08);
+      }
+      .assistant-panel .panel-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: #1D1D1F;
+      }
+      .assistant-panel .panel-close {
+        width: 24px;
+        height: 24px;
+        border: none;
+        background: transparent;
+        font-size: 20px;
+        color: #86868B;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        transition: background 150ms ease-out;
+      }
+      .assistant-panel .panel-close:hover {
+        background: rgba(0,0,0,0.05);
+      }
+      .assistant-panel .panel-body {
+        padding: 12px 16px;
+      }
+      .assistant-panel .panel-input {
+        width: 100%;
+        min-height: 60px;
+        border: 1px solid rgba(0,0,0,0.1);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 14px;
+        line-height: 1.5;
+        resize: vertical;
+        outline: none;
+        box-sizing: border-box;
+      }
+      .assistant-panel .panel-input:focus {
+        border-color: #007AFF;
+      }
+      .assistant-panel .panel-result {
+        margin-top: 12px;
+        min-height: 40px;
+        padding: 10px 12px;
+        background: #F5F5F7;
+        border-radius: 8px;
+      }
+      .assistant-panel .result-placeholder {
+        color: #86868B;
+        font-size: 13px;
+        margin: 0;
+      }
+      .assistant-panel .result-text {
+        color: #1D1D1F;
+        font-size: 14px;
+        line-height: 1.5;
+        margin: 0;
+        flex: 1;
+      }
+      .assistant-panel .result-with-copy {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .assistant-panel .copy-result-btn {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: transparent;
+        border: none;
+        color: #007AFF;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border-radius: 6px;
+        transition: background 150ms ease-out;
+        flex-shrink: 0;
+      }
+      .assistant-panel .copy-result-btn:hover {
+        background: rgba(0, 122, 255, 0.1);
+      }
+      .assistant-panel .panel-footer {
+        padding: 12px 16px;
+        border-top: 1px solid rgba(0,0,0,0.08);
+        display: flex;
+        justify-content: flex-end;
+      }
+      .assistant-panel .panel-translate-btn {
+        padding: 8px 20px;
+        background: #007AFF;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: opacity 150ms ease-out;
+      }
+      .assistant-panel .panel-translate-btn:hover {
+        opacity: 0.9;
+      }
+      @keyframes panelAppear {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    `;
+    assistantPanel.appendChild(panelStyle);
+    
+    // 阻止面板内点击事件冒泡到 document
+    assistantPanel.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+    
+    // 绑定事件
+    const closeBtn = assistantPanel.querySelector('.panel-close');
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideAssistantPanel();
+    });
+    
+    const input = assistantPanel.querySelector('.panel-input');
+    const resultDiv = assistantPanel.querySelector('.panel-result');
+    const translateBtn = assistantPanel.querySelector('.panel-translate-btn');
+    
+    // 自动聚焦
+    setTimeout(() => input.focus(), 100);
+    
+    // 翻译按钮点击
+    translateBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const text = input.value.trim();
+      if (!text) return;
+      
+      resultDiv.innerHTML = '<p class="result-placeholder">翻译中...</p>';
+      
+      try {
+        const result = await translateText(text);
+        resultDiv.innerHTML = `
+          <div class="result-with-copy">
+            <p class="result-text">${escapeHtml(result.text)}</p>
+            <button class="copy-result-btn" title="复制结果">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+              </svg>
+              <span>复制</span>
+            </button>
+          </div>
+        `;
+        
+        // 绑定复制按钮事件
+        const copyBtn = resultDiv.querySelector('.copy-result-btn');
+        copyBtn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(result.text);
+            copyBtn.innerHTML = `
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+              </svg>
+              <span>已复制</span>
+            `;
+            copyBtn.style.color = '#34C759';
+            setTimeout(() => {
+              copyBtn.innerHTML = `
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                  <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                </svg>
+                <span>复制</span>
+              `;
+              copyBtn.style.color = '#007AFF';
+            }, 1500);
+          } catch (err) {
+            // 复制失败，忽略
+          }
+        });
+      } catch (error) {
+        resultDiv.innerHTML = `<p class="result-placeholder" style="color: #FF3B30;">${escapeHtml(error.message)}</p>`;
+      }
+    });
+    
+    // 回车键翻译（Shift+Enter 换行）
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        translateBtn.click();
+      }
+    });
+    
+    shadowRoot.appendChild(assistantPanel);
+    
+    // 点击面板外部关闭
+    setTimeout(() => {
+      document.addEventListener('click', handleOutsideClick);
+    }, 100);
+  }
+  
+  /**
+   * 隐藏助手面板
+   */
+  function hideAssistantPanel() {
+    if (assistantPanel) {
+      assistantPanel.remove();
+      assistantPanel = null;
+    }
+    document.removeEventListener('click', handleOutsideClick);
+  }
+  
+  /**
+   * 处理点击面板外部
+   */
+  function handleOutsideClick(e) {
+    if (!assistantPanel) return;
+    
+    // 检查点击目标是否在面板或按钮内
+    const clickPath = e.composedPath();
+    const isInsidePanel = clickPath.includes(assistantPanel);
+    const isInsideButton = clickPath.includes(assistantButton);
+    
+    if (!isInsidePanel && !isInsideButton) {
+      hideAssistantPanel();
+    }
+  }
+  
+  // 初始化时创建助手按钮
+  function initAssistant() {
+    setTimeout(createAssistantButton, 1000);
+  }
+
+  init();
+  initAssistant();
 })();

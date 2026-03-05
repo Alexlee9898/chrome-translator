@@ -1,6 +1,6 @@
 # 极简翻译 - Chrome 扩展
 
-一款采用 Apple Design 风格的极简主义浏览器翻译插件，支持中英双向互译。
+一款极简主义浏览器翻译插件，支持中英双向互译。
 
 ![版本](https://img.shields.io/badge/version-1.0.0-blue)
 ![Manifest](https://img.shields.io/badge/Manifest-V3-green)
@@ -9,28 +9,37 @@
 ## ✨ 特性
 
 ### 设计风格
-- **Apple Design Philosophy**：纯白/浅灰背景，圆角 12-16px，微妙阴影
-- **极简主义**：无广告、无多余按钮、充足留白
+- **极简界面**：纯白/浅灰背景，圆角 12-16px，微妙阴影
+- **无广告、无多余按钮、充足留白**
 - **流畅动效**：200ms ease-out 平滑过渡，按钮悬停缩放效果
 
 ### 双模翻译系统
 1. **划词翻译**
-   - 选中任意网页文本，300ms 延迟弹出悬浮按钮
+   - 选中任意网页文本，100ms 延迟弹出悬浮按钮
    - 智能位置避让，自动调整显示位置防止溢出
    - 点击页面其他区域或按 ESC 键关闭
-   - 内置 500+ 常用词词典
+   - Shadow DOM 完全样式隔离，不影响原网页
 
 2. **输入翻译**
    - 点击工具栏图标弹出 360×480px 面板
-   - 500ms 防抖自动翻译
+   - 50ms 极速防抖自动翻译
    - 最近 10 条翻译历史记录
    - 一键复制结果（带成功反馈动画）
+   - 支持多种翻译服务切换
+
+### 支持的翻译服务
+- **Kimi (Moonshot)** - 推荐，Kimi K2.5 模型
+- **OpenAI (GPT)** - GPT-3.5-turbo
+- **Claude (Anthropic)** - Claude 3 Haiku
+- **Google 翻译** - Google Translate API
+- **Qwen (通义千问)** - 阿里云大模型
+- **GLM (智谱)** - 智谱 AI 大模型
 
 ### 技术亮点
 - **Manifest V3** 标准架构
 - **Shadow DOM** 100% 样式隔离，不影响原网页
 - **Service Worker** 后台处理，轻量高效
-- 原生 JavaScript，无外部依赖，体积 &lt; 200KB
+- 原生 JavaScript，无外部依赖，体积 < 200KB
 
 ## 📦 安装
 
@@ -47,40 +56,35 @@
 
 即将上架 Chrome Web Store，敬请期待。
 
-## 🔧 配置外部翻译 API（可选）
+## 🔧 配置翻译服务与 API Key
 
-本插件内置简易词典（约 500 常用词），如需更精准翻译，可配置外部 API：
+翻译依赖所选大模型/翻译服务的 API，需在插件内选择服务并填写对应 API Key：
 
-### Google Translate API
+1. 点击浏览器工具栏的「极简翻译」图标，打开翻译面板
+2. 展开底部 **「设置 · 翻译服务与 API」**
+3. 在「翻译服务」下拉框中选择服务
+4. 在 **API Key** 输入框中填入该服务的密钥
+5. 点击 **「保存设置」**
 
-1. 访问 [Google Cloud Console](https://console.cloud.google.com/)
-2. 创建项目并启用 **Cloud Translation API**
-3. 创建 API Key
-4. 打开 `background.js`，找到以下代码：
+支持的翻译服务与获取方式：
 
-```javascript
-const GOOGLE_API_KEY = ''; // 填入您的 API Key
-```
+| 服务 | 说明与获取 |
+|------|------------|
+| **Kimi (Moonshot)** | [Moonshot 开放平台](https://platform.moonshot.cn/) 获取 API Key，推荐 |
+| **OpenAI (GPT)** | [API Keys](https://platform.openai.com/api-keys) 创建密钥，按量计费 |
+| **Claude (Anthropic)** | [Console](https://console.anthropic.com/) 创建 API Key |
+| **Google 翻译** | [Google Cloud Console](https://console.cloud.google.com/) 启用 Cloud Translation API 并创建密钥 |
+| **Qwen (通义千问)** | [阿里云 DashScope](https://dashscope.console.aliyun.com/) 创建 API Key |
+| **GLM (智谱)** | [智谱开放平台](https://open.bigmodel.cn/) 获取 API Key |
 
-5. 填入 API Key，并取消注释 `translateWithGoogle` 函数调用
-
-### DeepL API
-
-1. 访问 [DeepL Pro](https://www.deepl.com/pro-api) 获取 API Key
-2. 打开 `background.js`，找到以下代码：
-
-```javascript
-const DEEPL_API_KEY = ''; // 填入您的 API Key
-```
-
-3. 填入 API Key，并取消注释 `translateWithDeepL` 函数调用
+API Key 仅保存在本机扩展存储中，不会上传到任何服务器。
 
 ## 📁 文件结构
 
 ```
 chrome-translator/
 ├── manifest.json          # 扩展配置（MV3）
-├── background.js          # Service Worker，API 调用
+├── background.js          # Service Worker，API 调用与缓存
 ├── content.js             # 划词翻译逻辑，Shadow DOM
 ├── content.css            # 全局样式覆盖
 ├── popup.html             # 输入翻译面板
@@ -97,7 +101,7 @@ chrome-translator/
 
 ### 划词翻译
 1. 在任意网页选中需要翻译的文本
-2. 等待 300ms，悬浮翻译按钮出现
+2. 等待 100ms，悬浮翻译按钮出现（蓝色圆形图标）
 3. 点击按钮，弹出翻译卡片
 4. 查看翻译结果，点击「复制」可复制
 5. 点击其他区域或按 ESC 关闭
@@ -105,9 +109,14 @@ chrome-translator/
 ### 输入翻译
 1. 点击浏览器工具栏的「极简翻译」图标
 2. 在输入框中输入要翻译的文本
-3. 停止输入 500ms 后自动翻译
-4. 点击语言切换按钮可切换翻译方向
+3. 停止输入 50ms 后自动翻译
+4. 点击语言切换按钮（🔃）可切换翻译方向：自动检测 → 中译英 → 英译中
 5. 点击下方历史记录可快速复用
+
+### 语言切换
+- **自动检测**：自动识别输入语言并翻译成对应语言
+- **中译英**：固定将中文翻译成英文
+- **英译中**：固定将英文翻译成中文
 
 ## ⚙️ 权限说明
 
@@ -122,6 +131,7 @@ chrome-translator/
 ### 本地调试
 1. 修改代码后，在 `chrome://extensions/` 点击刷新按钮
 2. 查看 Console 获取调试信息
+3. 划词翻译日志在网页控制台，输入翻译日志在 Service Worker 控制台
 
 ### 代码规范
 - 所有 DOM 操作使用 Shadow DOM 隔离
@@ -132,11 +142,13 @@ chrome-translator/
 
 ### v1.0.0 (2024-03)
 - ✅ 初始版本发布
-- ✅ 划词翻译功能
-- ✅ 输入翻译面板
-- ✅ Apple Design 风格 UI
-- ✅ 内置简易词典
+- ✅ 划词翻译功能（100ms 延迟）
+- ✅ 输入翻译面板（50ms 防抖）
+- ✅ 极简风格 UI
+- ✅ 支持 6 种翻译服务（Kimi、OpenAI、Claude、Google、Qwen、GLM）
 - ✅ 翻译历史记录
+- ✅ 翻译结果缓存
+- ✅ 语言自动检测与切换
 
 ## 🤝 贡献
 

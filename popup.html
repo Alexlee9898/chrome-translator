@@ -8,24 +8,9 @@
 </head>
 <body>
   <div class="app-container">
-    <!-- 头部：语言切换指示器 -->
     <header class="app-header">
-      <div class="language-switcher">
-        <div class="lang-box source-lang">
-          <span class="lang-label">自动检测</span>
-          <span class="lang-code">AUTO</span>
-        </div>
-        
-        <button class="swap-button" title="切换翻译方向">
-          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
-          </svg>
-        </button>
-        
-        <div class="lang-box target-lang">
-          <span class="lang-label">目标语言</span>
-          <span class="lang-code">EN</span>
-        </div>
+      <div class="language-switcher language-switcher-single">
+        <span class="auto-label">中英互译</span>
       </div>
     </header>
 
@@ -70,22 +55,35 @@
         </div>
       </div>
 
-      <!-- 历史记录 -->
-      <div class="history-section">
-        <div class="history-header">
-          <span class="history-title">最近翻译</span>
-          <button class="text-button clear-history">清空</button>
-        </div>
-        <div class="history-list">
-          <!-- 历史记录项将通过 JS 动态插入 -->
-          <p class="history-empty">暂无历史记录</p>
+      <!-- 设置：翻译服务与 API Key -->
+      <div class="settings-section">
+        <button type="button" class="settings-toggle" id="settings-toggle" aria-expanded="false">
+          <span class="settings-toggle-text">设置 · 翻译服务与 API</span>
+          <svg class="settings-chevron" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z" fill="currentColor"/></svg>
+        </button>
+        <div class="settings-panel" id="settings-panel" hidden>
+          <label class="settings-label">翻译服务</label>
+          <select id="setting-service" class="settings-select">
+            <option value="openai">OpenAI (GPT)</option>
+            <option value="claude">Claude (Anthropic)</option>
+            <option value="google">Google 翻译</option>
+            <option value="kimi">Kimi (Moonshot)</option>
+            <option value="qwen">Qwen (通义千问)</option>
+            <option value="glm">GLM (智谱)</option>
+          </select>
+          <div class="settings-api-row" id="api-key-row">
+            <label class="settings-label" for="setting-apikey">API Key</label>
+            <input type="password" id="setting-apikey" class="settings-input" placeholder="必填" autocomplete="off"/>
+          </div>
+          <button type="button" class="settings-save" id="settings-save">保存设置</button>
         </div>
       </div>
+
     </main>
 
     <!-- 底部 -->
     <footer class="app-footer">
-      <span class="footer-text">极简翻译 · Apple Design</span>
+      <span class="footer-text">极简翻译</span>
     </footer>
   </div>
 

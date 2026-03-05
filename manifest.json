@@ -1,7 +1,7 @@
 /**
  * manifest.json
  * Chrome Extension Manifest V3 配置文件
- * 翻译插件 - Apple Design Style
+ * 翻译插件
  */
 
 {
@@ -9,13 +9,13 @@
   "manifest_version": 3,
   
   // 扩展名称
-  "name": "极简翻译 - Apple Style",
+  "name": "极简翻译",
   
   // 版本号，遵循语义化版本规范
   "version": "1.0.0",
   
   // 扩展描述
-  "description": "极简风格的划词翻译和输入翻译工具，采用 Apple Design 设计语言",
+  "description": "极简风格的划词翻译和输入翻译工具",
   
   // 作者信息
   "author": "Chrome Translator Team",
@@ -33,11 +33,15 @@
     "scripting"
   ],
   
-  // 主机权限 - 预留 API 调用权限
+  // 主机权限 - 翻译/LLM API 调用
   "host_permissions": [
-    // 预留 Google Translate API 或其他翻译服务
     "https://translate.googleapis.com/*",
-    "https://api.translation-service.com/*"
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.moonshot.ai/*",
+    "https://dashscope.aliyuncs.com/*",
+    "https://api.minimaxi.com/*",
+    "https://open.bigmodel.cn/*"
   ],
   
   // 后台服务 Worker 配置
